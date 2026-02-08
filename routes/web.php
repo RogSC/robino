@@ -17,7 +17,9 @@ Route::get('dashboard', function () {
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 // Telegram webhook route
-Route::post('/telegram/webhook', [TelegramWebhookController::class, 'handleWebhook'])->name('telegram.webhook');
+Route::post('/telegram/webhook', [TelegramWebhookController::class, 'handleWebhook'])
+    ->middleware(\App\Http\Middleware\LogTelegramRequests::class)
+    ->name('telegram.webhook');
 
 // Subscription routes
 Route::prefix('api/subscription')->group(function () {

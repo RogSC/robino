@@ -32,10 +32,15 @@ class TelegramWebhookController extends Controller
     public function handleWebhook(Request $request): JsonResponse
     {
         try {
+            // Логируем начало обработки
+            Log::channel('telegram')->info('=== START: Processing Telegram webhook ===');
+            
             $update = $request->all();
+            
+            Log::channel('telegram')->debug('Received update data', ['update' => $update]);
 
             if (!isset($update['message'])) {
-                Log::warning('Received webhook without message', $update);
+                Log::channel('telegram')->warning('Received webhook without message', $update);
                 return response()->json(['status' => 'ok']);
             }
 
@@ -45,9 +50,15 @@ class TelegramWebhookController extends Controller
             $text = $message['text'] ?? '';
 
             if (!$chatId || !$userId) {
-                Log::warning('Missing chat or user ID', $update);
+                Log::channel('telegram')->warning('Missing chat or user ID', $update);
                 return response()->json(['status' => 'ok']);
             }
+
+            Log::channel('telegram')->info('Processing message', [
+                'chat_id' => $chatId,
+                'user_id' => $userId,
+                'text' => $text,
+            ]);
 
             // Register or update the Telegram user
             $telegramUserData = [
@@ -57,18 +68,24 @@ class TelegramWebhookController extends Controller
                 'username' => $message['from']['username'] ?? null,
             ];
 
+            Log::channel('telegram')->debug('Registering/updating user', $telegramUserData);
             $telegramUser = $this->telegramBotService->registerOrUpdateUser($telegramUserData);
+            Log::channel('telegram')->info('User registered/updated', ['telegram_user_id' => $telegramUser->id]);
 
             // Check access control
+            Log::channel('telegram')->debug('Checking access control');
             $accessResult = $this->accessControlService->validateAccess($telegramUser, 'send_message');
             if (!$accessResult['allowed']) {
+                Log::channel('telegram')->warning('Access denied', ['reason' => $accessResult['message']]);
                 $this->telegramBotService->sendMessage($chatId, $accessResult['message']);
                 return response()->json(['status' => 'ok']);
             }
 
             // Process the command
+            Log::channel('telegram')->info('Processing command', ['text' => $text]);
             $this->processCommand($telegramUser, $chatId, $text);
 
+            Log::channel('telegram')->info('=== END: Successfully processed webhook ===');
             return response()->json(['status' => 'ok']);
         } catch (\Exception $e) {
             Log::error('Error processing Telegram webhook: ' . $e->getMessage(), [
