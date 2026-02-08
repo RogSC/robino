@@ -102,6 +102,14 @@ class TelegramWebhookController extends Controller
      */
     protected function processCommand(TelegramUser $telegramUser, int $chatId, string $text): void
     {
+        // Handle deep link for partner connection
+        if (preg_match('/^\/start partner_([A-Z0-9]+)$/', $text, $matches)) {
+            $partnerCode = $matches[1];
+            $result = $this->telegramBotService->connectPartner($telegramUser, $partnerCode);
+            $this->telegramBotService->sendMessage($chatId, $result['message'], ['parse_mode' => 'Markdown']);
+            return;
+        }
+
         // Normalize the command
         $command = strtolower(trim($text));
         
@@ -111,15 +119,20 @@ class TelegramWebhookController extends Controller
             $commandName = $parts[0];
             $commandArgs = $parts[1] ?? '';
             
+            // Use new handleCommand method for period tracking commands
+            $periodCommands = [
+                '/start_period', '/end_period', '/status',
+                '/period_status', '/invite_partner', '/connect_partner',
+                '/partner_status', '/remove_partner'
+            ];
+            
+            if (in_array($commandName, $periodCommands) || $commandName === '/start' || $commandName === '/help') {
+                $result = $this->telegramBotService->handleCommand($telegramUser, $commandName, $commandArgs);
+                $this->telegramBotService->sendMessage($chatId, $result['message'], ['parse_mode' => 'Markdown']);
+                return;
+            }
+            
             switch ($commandName) {
-                case '/start':
-                    $this->handleStartCommand($telegramUser, $chatId);
-                    break;
-                    
-                case '/help':
-                    $this->handleHelpCommand($telegramUser, $chatId);
-                    break;
-                    
                 case '/add':
                     $this->handleAddCommand($telegramUser, $chatId, $commandArgs);
                     break;
@@ -150,71 +163,55 @@ class TelegramWebhookController extends Controller
                     break;
             }
         } else {
-            // Assume it's a food entry if it doesn't start with /
-            $this->handleFoodEntry($telegramUser, $chatId, $text);
+            // Check if it's a question for AI
+            if ($this->looksLikeQuestion($text)) {
+                $this->handleAIQuery($telegramUser, $chatId, $text);
+            } else {
+                // Assume it's a food entry if it doesn't start with /
+                $this->handleFoodEntry($telegramUser, $chatId, $text);
+            }
         }
     }
 
     /**
-     * Handle /start command
+     * Check if text looks like a question
      */
-    protected function handleStartCommand(TelegramUser $telegramUser, int $chatId): void
+    protected function looksLikeQuestion(string $text): bool
     {
-        $welcomeMessage = "
-🤖 Welcome to Nutrition Tracker Bot!
-
-I help you track your daily nutrition and calories. Here's how to get started:
-
-🍽️ *Logging Meals*
-Simply send me what you ate with the weight, like:
-• `Chicken breast 150g`
-• `Rice 200g`
-• `Apple 180g`
-
-📋 *Available Commands*
-• /today - View today's nutrition summary
-• /week - View weekly nutrition summary
-• /add - Add a meal (alternative to free text)
-• /profile - View your subscription details
-• /subscribe - Manage your subscription
-• /support - Contact support
-
-For detailed help, send /help
-        ";
-
-        $this->telegramBotService->sendMessage($chatId, $welcomeMessage, ['parse_mode' => 'Markdown']);
+        // Check for question marks or question words
+        $questionWords = ['when', 'what', 'where', 'why', 'how', 'who', 'which', 'is', 'am', 'are', 'can', 'could', 'should', 'will'];
+        $firstWord = strtolower(explode(' ', trim($text))[0] ?? '');
+        
+        return str_contains($text, '?') || in_array($firstWord, $questionWords);
     }
 
     /**
-     * Handle /help command
+     * Handle AI query
+     */
+    protected function handleAIQuery(TelegramUser $telegramUser, int $chatId, string $query): void
+    {
+        Log::channel('telegram')->info('Processing AI query', ['query' => $query]);
+        
+        $result = $this->telegramBotService->queryAI($telegramUser, $query);
+        $this->telegramBotService->sendMessage($chatId, $result['message'], ['parse_mode' => 'Markdown']);
+    }
+
+    /**
+     * Handle /start command (delegated to TelegramBotService)
+     */
+    protected function handleStartCommand(TelegramUser $telegramUser, int $chatId): void
+    {
+        $result = $this->telegramBotService->handleCommand($telegramUser, '/start', null);
+        $this->telegramBotService->sendMessage($chatId, $result['message'], ['parse_mode' => 'Markdown']);
+    }
+
+    /**
+     * Handle /help command (delegated to TelegramBotService)
      */
     protected function handleHelpCommand(TelegramUser $telegramUser, int $chatId): void
     {
-        $helpMessage = "
-📋 *Available Commands*
-
-🍽️ *Tracking*
-• `Food name and weight` - Add a meal (e.g., \"Chicken 150g\")
-• /add [food] [weight] - Add a meal (e.g., /add rice 200g)
-
-📊 *Reports*
-• /today - Today's nutrition summary
-• /week - Weekly nutrition summary
-
-👤 *Account*
-• /profile - View subscription & profile info
-• /subscribe - Manage subscription
-
-💬 *Support*
-• /support - Contact customer support
-
-💡 *Tips*
-• Include weight measurements (g, kg, oz, etc.)
-• You can add multiple meals throughout the day
-• Track your nutrition goals easily!
-        ";
-
-        $this->telegramBotService->sendMessage($chatId, $helpMessage, ['parse_mode' => 'Markdown']);
+        $result = $this->telegramBotService->handleCommand($telegramUser, '/help', null);
+        $this->telegramBotService->sendMessage($chatId, $result['message'], ['parse_mode' => 'Markdown']);
     }
 
     /**

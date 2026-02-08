@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'roocode' => [
+        'api_url' => env('ROOCODE_API_URL', 'http://localhost:3000/api/ai'),
+        'api_key' => env('ROOCODE_API_KEY'),
+    ],
+
 ];
